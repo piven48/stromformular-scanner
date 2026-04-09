@@ -208,7 +208,9 @@ function runComparison(scanResult, excelFields) {
       anmerkung = 'Teilmenge';
     } else {
       const ratio = wordOverlap(excelNorm, scanNorm);
-      if (ratio >= 0.4) {
+      const ratioReverse = wordOverlap(scanNorm, excelNorm);
+      const maxRatio = Math.max(ratio, ratioReverse);
+      if (maxRatio >= 0.35) {
         status = 'gekuerzt';
         anmerkung = 'Scan kürzer formuliert';
       } else {

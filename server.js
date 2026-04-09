@@ -171,7 +171,7 @@ async function runJob(jobId, excelPath, emitter) {
     permissions: ['clipboard-read', 'clipboard-write'],
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(12 * 60 * 1000);
+  page.setDefaultTimeout(16 * 60 * 1000);
 
   // Browser-Konsole ins Log spiegeln
   page.on('console', msg => {
@@ -209,7 +209,12 @@ async function runJob(jobId, excelPath, emitter) {
 
   emit(emitter, 'progress', { pct: 10, text: 'Scan läuft (~3-5 Minuten)...' });
 
-  const scanResult = await page.evaluate(SCAN_JS);
+  // MAX_RUNTIME auf 15 Min hochsetzen damit Seite 2 nicht übersprungen wird
+  const scanJsPatched = SCAN_JS.replace(
+    /var MAX_RUNTIME\s*=\s*\d+\s*\*\s*60\s*\*\s*1000/,
+    'var MAX_RUNTIME = 15 * 60 * 1000'
+  );
+  const scanResult = await page.evaluate(scanJsPatched);
   await browser.close();
 
   if (!scanResult?.fields) throw new Error('Scan hat kein Ergebnis zurückgegeben.');
