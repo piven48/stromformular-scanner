@@ -1,0 +1,10 @@
+node_modules/
+scan_result.json
+id_vergleich.json
+label_vergleich.json
+Vergleich_*.xlsx
+formular-scanner-extracted/
+formular-scanner.zip
+.env
+*.log
+.DS_Store
