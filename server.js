@@ -11,7 +11,7 @@ const os       = require('os');
 const crypto   = require('crypto');
 const { EventEmitter } = require('events');
 const { chromium } = require('playwright');
-const { parseExcel, runComparison, generateExcel } = require('./compare');
+const { parseExcel, runComparison, generateExcel, enhanceWithClaude } = require('./compare');
 
 const SCAN_JS   = fs.readFileSync(path.join(__dirname, 'Final_Formular_Scan_v35.js'), 'utf8');
 const FORM_URL  = 'https://www.formulare-bfinv.de/ffw/action/invoke.do?id=1400';
@@ -224,13 +224,21 @@ async function runJob(jobId, excelPath, emitter) {
 
   // 3. Vergleich
   emit(emitter, 'progress', { pct: 88, text: 'Vergleich wird berechnet...' });
-  const comparison = runComparison(scanResult, excelFields);
+  let comparison = runComparison(scanResult, excelFields);
 
   const idCounts = comparison.idVergleich.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
   emit(emitter, 'log', `ID-Vergleich: ${idCounts.exakt||0} exakt | ${idCounts.ungefaehr||0} umbenannt | ${idCounts.nurExcel||0} nur Excel | ${idCounts.nurScan||0} neu im Scan`);
 
+  // 3b. Claude Haiku Enhancement (optional, wenn API-Key vorhanden)
+  if (process.env.ANTHROPIC_API_KEY && idCounts.nurScan > 0) {
+    emit(emitter, 'progress', { pct: 91, text: `Claude analysiert ${idCounts.nurScan} neue Felder...` });
+    emit(emitter, 'log', `Claude Haiku: Analysiere ${idCounts.nurScan} neue Felder...`);
+    comparison = await enhanceWithClaude(comparison, scanResult);
+    emit(emitter, 'log', '✓ Claude-Analyse abgeschlossen.');
+  }
+
   // 4. Excel generieren
-  emit(emitter, 'progress', { pct: 94, text: 'Excel wird erstellt...' });
+  emit(emitter, 'progress', { pct: 95, text: 'Excel wird erstellt...' });
   const resultPath = path.join(JOBS_DIR, `result_${jobId}.xlsx`);
   await generateExcel(comparison, resultPath);
 
