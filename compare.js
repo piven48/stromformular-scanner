@@ -1,51 +1,49 @@
 /**
- * compare.js – Vergleichslogik (lokal, kein API-Key nötig)
- * Wird von server.js verwendet.
+ * compare.js – Vergleichslogik v2
+ * Änderungen gegenüber v1:
+ *  - Semikolon-IDs werden im ID-Vergleich in einzelne Zeilen aufgeteilt
+ *  - Vorblatt_reg_art2 → Vorblatt_reg_art2-selectized als Umbenennung
+ *  - MessageEmbedding_* und hidden Base-Selects (wenn -selectized vorhanden) gefiltert
+ *  - Label-Normalisierung verbessert (datum4/datum7/bet5 → Gekürzt)
  */
 
-const XLSX   = require('xlsx');
+const XLSX    = require('xlsx');
 const ExcelJS = require('exceljs');
-const path   = require('path');
+const path    = require('path');
 
+// ── Bekannte Umbenennungen: Excel-ID → Scan-ID ─────────────────────────────
 const RENAMES = {
   'Vorblatt_plz_de':                  'Vorblatt_plz',
   'Vorblatt_plz_de2':                 'Vorblatt_plz2',
   'Vorblatt_plz_de_hauptbuchhaltung': 'Vorblatt_plz_hauptbuchhaltung',
   'iban_land':                        'iban_land-selectized',
+  'Vorblatt_reg_art2':                'Vorblatt_reg_art2-selectized',
 };
 const RENAME_TARGETS = new Set(Object.values(RENAMES));
 
-function isUIField(id) {
+// ── UI-Felder ausschließen ─────────────────────────────────────────────────
+function isUIField(id, scanIds) {
+  // Technische Embedding-Felder
+  if (/^MessageEmbedding_/.test(id)) return true;
+  // Hidden Base-Select: wenn die -selectized Version im Scan existiert
+  if (!id.endsWith('-selectized') && scanIds && scanIds.has(id + '-selectized')) return true;
+  // Standard UI-Pattern (außer Rename-Ziele)
   if (RENAME_TARGETS.has(id)) return false;
   return /wechsel|aria-selectize(?!.*iban)|dropdown/i.test(id);
 }
 
-function expandExcelId(id) {
-  const parts = id.split(';').map(s => s.trim()).filter(Boolean);
-  const all = new Set(parts);
-  for (const p of parts) {
-    for (const [ja, nein] of [['_ja','_nein'],['_ja2','_nein2'],['_ja3','_nein3'],['_j','_n']]) {
-      if (p.endsWith(ja))   all.add(p.slice(0, -ja.length)   + nein);
-      if (p.endsWith(nein)) all.add(p.slice(0, -nein.length) + ja);
-    }
-    if (p === 'Vorblatt_k_antrag1') all.add('Vorblatt_k_antrag2');
+// ── Ja/Nein-Partner-Erweiterung ────────────────────────────────────────────
+function expandPartners(id) {
+  const all = new Set([id]);
+  for (const [ja, nein] of [['_ja','_nein'],['_ja2','_nein2'],['_ja3','_nein3'],['_j','_n']]) {
+    if (id.endsWith(ja))   all.add(id.slice(0, -ja.length)   + nein);
+    if (id.endsWith(nein)) all.add(id.slice(0, -nein.length) + ja);
   }
+  if (id === 'Vorblatt_k_antrag1') all.add('Vorblatt_k_antrag2');
   return all;
 }
 
-function normalize(s) {
-  return s
-    .replace(/\*/g, '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ')
-    .replace(/^\d+(\.\d+)*\s+/, '')
-    .replace(/Elektrischer Strom.*?\)/gi, '')
-    .replace(/Elektronischer Strom.*?\)/gi, '')
-    .replace(/- selbst betriebene Stromerzeugungsanlagen[^(]*/gi, '')
-    .replace(/- (von|durch) Dritte[^(]*/gi, '')
-    .replace(/INFO:.*$/s, '')
-    .replace(/§\s*9/g, '§ 9').replace(/Absatz/g, 'Abs.').replace(/Nummer/g, 'Nr.')
-    .replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
+// ── Excel einlesen ─────────────────────────────────────────────────────────
 function parseExcel(excelPath) {
   const wb  = XLSX.readFile(excelPath);
   const ws  = wb.Sheets[wb.SheetNames[0]];
@@ -60,92 +58,164 @@ function parseExcel(excelPath) {
   return fields;
 }
 
+// ── Label-Normalisierung ───────────────────────────────────────────────────
+function normalize(s) {
+  return s
+    .replace(/\*/g, '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^\d+(\.\d+)*\s+/, '')                               // Abschnittsnummern (9.1.1 etc.)
+    .replace(/Elektrischer Strom\s*§\s*1\s*StromStG/gi, '')      // "Elektrischer Strom § 1 StromStG"
+    .replace(/Elektronischer Strom\s*§\s*1\s*StromStG/gi, '')
+    .replace(/\s*-\s*[^()\n]*Stromerzeugungsanlagen[^()\n]*/gi, '') // Anlagenart-Details
+    .replace(/[–-]\s*bis zu \d+\s*MW[^()\n]*/gi, '')             // "– bis zu 2 MW ..."
+    .replace(/\(Contracting\)/gi, '')                             // "(Contracting)"
+    .replace(/\(Menge in MWh\)/gi, '')                           // "(Menge in MWh)"
+    .replace(/- (von|durch) Dritte[^(]*/gi, '')
+    .replace(/INFO:.*$/s, '')
+    .replace(/§\s*9/g, '§ 9')
+    .replace(/Absatz/g, 'Abs.')
+    .replace(/Nummer/g, 'Nr.')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function wordOverlap(a, b) {
+  const wa = new Set(a.split(/\s+/).filter(w => w.length > 3));
+  const wb = new Set(b.split(/\s+/).filter(w => w.length > 3));
+  if (wa.size === 0) return 0;
+  return [...wa].filter(w => wb.has(w)).length / wa.size;
+}
+
+// ── Hauptvergleich ─────────────────────────────────────────────────────────
 function runComparison(scanResult, excelFields) {
   const scanMap  = new Map(scanResult.fields.map(f => [f.id, f]));
   const scanIds  = new Set(scanResult.fields.map(f => f.id));
-  const covered  = new Set();
-  const idVergleich = [];
-  let nr = 0;
+  const covered  = new Set(); // Scan-IDs die durch Excel abgedeckt sind
 
-  // ── ID-Vergleich ──────────────────────────────────────────────────────────
+  // ── ID-Vergleich ───────────────────────────────────────────────────────
+  // Semikolon-IDs in einzelne Zeilen aufteilen
+  const expandedForId = [];
   for (const ef of excelFields) {
-    nr++;
-    const primaryIds = ef.id.split(';').map(s => s.trim());
-    const expanded   = expandExcelId(ef.id);
-    for (const eid of expanded) covered.add(eid);
-
-    // Rename-Ziel abdecken
-    let renamedTarget = null;
-    for (const pid of primaryIds) {
-      if (RENAMES[pid]) { renamedTarget = RENAMES[pid]; covered.add(renamedTarget); }
-    }
-
-    const foundDirect  = primaryIds.some(id => scanIds.has(id));
-    const foundRenamed = renamedTarget && scanIds.has(renamedTarget);
-
-    if (foundDirect) {
-      idVergleich.push({ nr, idExcel: ef.id, idScan: primaryIds.filter(id => scanIds.has(id)).join(';') || ef.id, status: 'exakt', anmerkung: '' });
-    } else if (foundRenamed) {
-      idVergleich.push({ nr, idExcel: ef.id, idScan: renamedTarget, status: 'ungefaehr', anmerkung: 'Umbenennung: ' + ef.id + ' → ' + renamedTarget });
-    } else {
-      const partnerMatch = primaryIds.some(id => {
-        const base = id.replace(/_nein(\d*)$/, '_ja$1').replace(/_n(\d+)$/, '_j$1');
-        return base !== id && scanIds.has(base);
-      });
-      if (partnerMatch) {
-        idVergleich.push({ nr, idExcel: ef.id, idScan: '(Partner im Scan)', status: 'exakt', anmerkung: 'Ja/Nein-Partner vorhanden' });
-      } else {
-        idVergleich.push({ nr, idExcel: ef.id, idScan: '-', status: 'nurExcel', anmerkung: 'Nicht im Scan gefunden' });
-      }
+    const parts = ef.id.split(';').map(s => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      expandedForId.push({ id: part, label: ef.label, semikolonGruppe: ef.id });
     }
   }
 
-  // Nur-im-Scan
-  const nurImScan = scanResult.fields.filter(f => !isUIField(f.id) && !covered.has(f.id));
+  const idVergleich = [];
+  let nr = 0;
+
+  for (const ef of expandedForId) {
+    nr++;
+    const partners = expandPartners(ef.id);
+    for (const p of partners) covered.add(p);
+
+    const renamedTarget = RENAMES[ef.id];
+    if (renamedTarget) covered.add(renamedTarget);
+
+    // foundDirect: nur wenn Feld sichtbar ist ODER kein Rename existiert
+    const directScanField = scanMap.get(ef.id);
+    const foundDirect  = !!directScanField && (directScanField.visible !== false || !renamedTarget);
+    const foundRenamed = renamedTarget && scanIds.has(renamedTarget);
+    const partnerMatch = !foundDirect && !foundRenamed && [...partners].some(p => p !== ef.id && scanIds.has(p));
+
+    if (foundDirect || partnerMatch) {
+      idVergleich.push({ nr, idExcel: ef.id, idScan: foundDirect ? ef.id : [...partners].find(p => scanIds.has(p)), status: 'exakt', anmerkung: partnerMatch ? 'Ja/Nein-Partner' : '' });
+    } else if (foundRenamed) {
+      idVergleich.push({ nr, idExcel: ef.id, idScan: renamedTarget, status: 'ungefaehr', anmerkung: 'Umbenannt: ' + ef.id + ' → ' + renamedTarget });
+    } else {
+      idVergleich.push({ nr, idExcel: ef.id, idScan: '-', status: 'nurExcel', anmerkung: 'Nicht im Scan gefunden' });
+    }
+  }
+
+  // Nur-im-Scan: Felder die nicht in Excel abgedeckt sind
+  const nurImScan = scanResult.fields.filter(f => !isUIField(f.id, scanIds) && !covered.has(f.id));
   for (const f of nurImScan) {
     nr++;
     let seite = 'Vorblatt';
     if (f.id.startsWith('ke_') || f.id === 'menge22' || f.id === 'menge23') seite = 'Seite 2';
     else if (!f.id.startsWith('Vorblatt') && !['ansprechpartner','telefon','telefax','email','internet','mastrnr'].includes(f.id)) seite = 'Seite 1';
+
     const neighbors = scanResult.fields
       .filter(n => n.id !== f.id && Math.abs(n.position_y - f.position_y) < 60 && covered.has(n.id))
       .map(n => n.id).slice(0, 2);
-    const pos = seite + ' | Kontext: ' + (f.foundInContext || '') + (neighbors.length ? ' | Nachbar: ' + neighbors.join(', ') : '');
-    idVergleich.push({ nr, idExcel: '-', idScan: f.id, status: 'nurScan', anmerkung: pos });
+    const pos = seite + ' | y=' + f.position_y + (neighbors.length ? ' | Nachbar: ' + neighbors.join(', ') : '');
+    idVergleich.push({ nr, idExcel: '—', idScan: f.id, status: 'nurScan', anmerkung: pos });
   }
 
-  // ── Label-Vergleich ───────────────────────────────────────────────────────
+  // ── Label-Vergleich ────────────────────────────────────────────────────
+  // Semikolon-IDs bleiben zusammen (da gleiche Label)
   const labelVergleich = [];
   nr = 0;
 
   for (const ef of excelFields) {
     nr++;
     const primaryIds = ef.id.split(';').map(s => s.trim());
+
+    // Scan-Feld suchen — bei Umbenennungen immer das Rename-Ziel bevorzugen
     let scanField = null;
+    let usedRename = false;
     for (const pid of primaryIds) {
-      if (scanMap.has(pid)) { scanField = scanMap.get(pid); break; }
-      if (RENAMES[pid] && scanMap.has(RENAMES[pid])) { scanField = scanMap.get(RENAMES[pid]); break; }
+      if (RENAMES[pid] && scanMap.has(RENAMES[pid])) {
+        scanField = scanMap.get(RENAMES[pid]); usedRename = true; break;
+      }
+      const direct = scanMap.get(pid);
+      if (direct && direct.visible !== false) { scanField = direct; break; }
+      if (direct) { scanField = direct; } // hidden fallback
+    }
+    if (!scanField && primaryIds.some(p => scanMap.has(p))) {
+      scanField = scanMap.get(primaryIds.find(p => scanMap.has(p)));
     }
 
     if (!scanField) {
-      labelVergleich.push({ nr, feldId: ef.id, bezeichnungExcel: ef.label, bezeichnungScan: '—', status: 'abweichend', anmerkung: 'Kein Scan-Feld' });
+      const renamedNote = primaryIds.map(p => RENAMES[p]).filter(Boolean);
+      labelVergleich.push({
+        nr, feldId: ef.id,
+        bezeichnungExcel: ef.label,
+        bezeichnungScan: '—',
+        status: 'abweichend',
+        anmerkung: renamedNote.length ? 'ID umbenannt: ' + primaryIds[0] + ' → ' + renamedNote[0] : 'Kein Scan-Feld',
+      });
+      continue;
+    }
+
+    // Rename-Ziel mit leerem Label → Abweichend (ID wurde umbenannt, neues Feld hat anderen Label)
+    if (usedRename && !scanField.label) {
+      const renameId = primaryIds.find(p => RENAMES[p]);
+      labelVergleich.push({
+        nr, feldId: ef.id,
+        bezeichnungExcel: ef.label,
+        bezeichnungScan: '—',
+        status: 'abweichend',
+        anmerkung: 'ID umbenannt: ' + renameId + ' → ' + RENAMES[renameId],
+      });
       continue;
     }
 
     const excelNorm = normalize(ef.label);
     const scanNorm  = normalize(scanField.label || '');
-    let status = 'abweichend', anmerkung = '';
 
-    if (!scanField.label || scanNorm === excelNorm || scanNorm.includes(excelNorm) || excelNorm.includes(scanNorm)) {
+    let status = 'abweichend';
+    let anmerkung = '';
+
+    if (!scanField.label || scanNorm === excelNorm) {
       status = 'identisch';
-      if (scanNorm !== excelNorm) anmerkung = 'Teilmenge';
+    } else if (scanNorm.includes(excelNorm) || excelNorm.includes(scanNorm)) {
+      status = 'identisch';
+      anmerkung = 'Teilmenge';
     } else {
-      const ew = new Set(excelNorm.split(/\s+/).filter(w => w.length > 3));
-      const sw = new Set(scanNorm.split(/\s+/).filter(w => w.length > 3));
-      const ratio = ew.size > 0 ? [...ew].filter(w => sw.has(w)).length / ew.size : 0;
-      if (ratio >= 0.4) { status = 'gekuerzt'; anmerkung = 'Scan kürzer formuliert'; }
-      else              { status = 'abweichend'; anmerkung = 'Inhaltlich abweichend'; }
+      const ratio = wordOverlap(excelNorm, scanNorm);
+      if (ratio >= 0.4) {
+        status = 'gekuerzt';
+        anmerkung = 'Scan kürzer formuliert';
+      } else {
+        status = 'abweichend';
+        anmerkung = 'Inhaltlich abweichend';
+      }
     }
+
     labelVergleich.push({ nr, feldId: ef.id, bezeichnungExcel: ef.label, bezeichnungScan: scanField.label || '', status, anmerkung });
   }
 
@@ -159,6 +229,7 @@ function runComparison(scanResult, excelFields) {
   return { idVergleich, labelVergleich };
 }
 
+// ── Excel-Ausgabe ──────────────────────────────────────────────────────────
 const STATUS_COLOR = {
   exakt: 'C6EFCE', ungefaehr: 'FCE4D6', nurExcel: 'FFC7CE', nurScan: 'BDD7EE',
   identisch: 'C6EFCE', gekuerzt: 'FFFFCC', abweichend: 'FFC7CE',
@@ -215,7 +286,12 @@ async function generateExcel(comparison, outputPath) {
     'status');
 
   wsL.addRow([]); wsL.addRow(['— Legende —']);
-  for (const [s, l, d] of [['identisch','Identisch','Bezeichnung gleich'],['gekuerzt','Gekürzt','Scan kürzer formuliert'],['abweichend','Abweichend','Inhaltlich anders'],['nurScan','Nur im Scan','Neues Feld, nicht in Excel']]) {
+  for (const [s, l, d] of [
+    ['identisch',  'Identisch',  'Bezeichnung gleich'],
+    ['gekuerzt',   'Gekürzt',    'Scan kürzer formuliert, gleicher Inhalt'],
+    ['abweichend', 'Abweichend', 'Inhaltlich anders'],
+    ['nurScan',    'Nur im Scan','Neues Feld, nicht in Excel'],
+  ]) {
     const r = wsL.addRow([l, '', d]);
     const col = STATUS_COLOR[s];
     if (col) r.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + col } };
