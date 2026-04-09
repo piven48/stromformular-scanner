@@ -13,7 +13,7 @@ const { EventEmitter } = require('events');
 const { chromium } = require('playwright');
 const { parseExcel, runComparison, generateExcel, enhanceWithClaude } = require('./compare');
 
-const SCAN_JS   = fs.readFileSync(path.join(__dirname, 'Final_Formular_Scan_v35.js'), 'utf8');
+const SCAN_JS   = fs.readFileSync(path.join(__dirname, 'Final_Formular_Scan_v36.js'), 'utf8');
 const FORM_URL  = 'https://www.formulare-bfinv.de/ffw/action/invoke.do?id=1400';
 const PORT      = process.env.PORT || 3400;
 const JOBS_DIR  = path.join(os.tmpdir(), 'formular-jobs');
