@@ -209,7 +209,12 @@ async function runJob(jobId, excelPath, emitter) {
 
   emit(emitter, 'progress', { pct: 10, text: 'Scan läuft (~3-5 Minuten)...' });
 
-  const scanResult = await page.evaluate(SCAN_JS);
+  // MAX_RUNTIME auf 15 Min erhöhen (Server langsamer als lokal) — Skript selbst unverändert
+  const scanJsPatched = SCAN_JS.replace(
+    /var MAX_RUNTIME\s*=\s*10\s*\*\s*60\s*\*\s*1000/,
+    'var MAX_RUNTIME = 15 * 60 * 1000'
+  );
+  const scanResult = await page.evaluate(scanJsPatched);
   await browser.close();
 
   if (!scanResult?.fields) throw new Error('Scan hat kein Ergebnis zurückgegeben.');
