@@ -10,14 +10,28 @@
   function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   function waitForStable() {
+    // FIX v39 #1: 300ms Extra-Puffer nach letzter DOM-Mutation.
+    // Verhindert Race Condition wenn FMS nach einem Klick mehrere
+    // sequenzielle AJAX-Responses schickt (jede loest MutationObserver
+    // aus und resettet den 800ms-Timer). Der Puffer stellt sicher dass
+    // auch die letzte Response vollstaendig gerendert ist bevor
+    // scanFields() aufgerufen wird.
     return new Promise(function (resolve) {
-      var timeout = setTimeout(function () { resolve(); }, 2500);
+      var settled = false;
+      function done() {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(hardLimit);
+        setTimeout(resolve, 300); // Extra-Puffer nach letzter Mutation
+      }
+      var timeout = setTimeout(done, 2500);
       var observer = new MutationObserver(function () {
         clearTimeout(timeout);
-        timeout = setTimeout(function () { observer.disconnect(); resolve(); }, 800);
+        timeout = setTimeout(done, 800);
       });
       observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-      setTimeout(function () { observer.disconnect(); resolve(); }, 4000);
+      var hardLimit = setTimeout(done, 4000);
     });
   }
 
@@ -260,7 +274,28 @@
         var el = els[i];
         var id = el.id || el.name || null;
         if (!id || id.indexOf("lip") === 0 || id.indexOf("$") === 0) continue;
-        if (allFields.has(id)) continue;
+        // FIX v39 #2: Wenn ein Feld bereits erfasst wurde, aber mit
+        // width=0/height=0 (hidden), und jetzt sichtbar ist: Koordinaten
+        // und visible-Flag aktualisieren statt zu ueberspringen.
+        if (allFields.has(id)) {
+          var rect = el.getBoundingClientRect();
+          var cs2 = window.getComputedStyle(el);
+          var nowVis = rect.width > 0 && rect.height > 0 && cs2.display !== "none" && cs2.visibility !== "hidden";
+          if (nowVis) {
+            var ex = allFields.get(id);
+            if (!ex.visible) {
+              ex.visible = true;
+              ex.position_x = Math.round(rect.left + window.scrollX);
+              ex.position_y = Math.round(rect.top + window.scrollY);
+              ex.width = Math.round(rect.width);
+              ex.height = Math.round(rect.height);
+              ex.foundInContext = ctx + ":updated";
+              allFields.set(id, ex);
+              log("  [updated] " + id + " jetzt sichtbar");
+            }
+          }
+          continue;
+        }
         var rect = el.getBoundingClientRect();
         var ft = el.tagName.toLowerCase();
         if (el.type) ft = el.type;
@@ -516,6 +551,19 @@
       } catch (e) { }
       if (allFields.size > vorher) log("  >> " + selId + "='" + optVal + "' -> +" + (allFields.size - vorher) + " neu");
     }
+    // FIX v39 #3: Register-Felder SOFORT sichern bevor selectedIndex
+    // zurueckgesetzt wird und das Formular zuklappt. Im Original geschah
+    // sucheRegisterFelder() erst nach diesem Reset — dann waren die
+    // Felder bereits aus dem DOM verschwunden.
+    sucheRegisterFelder(
+      ["Vorblatt_reg_art2", "Vorblatt_reg_art2-selectized",
+       "Vorblatt_reg_nr2", "Vorblatt_reg_gericht2",
+       "Vorblatt_k_regeintrag_ja", "Vorblatt_k_regeintrag_nein",
+       "Vorblatt_reg_art3", "Vorblatt_reg_nr3", "Vorblatt_reg_gericht3",
+       "Vorblatt_reg_art3-selectized",
+       "Vorblatt_k_regeintrag_vertr_ja", "Vorblatt_k_regeintrag_vertr_nein"],
+      selId + ":vorReset"
+    );
     try { sel.selectedIndex = origIdx; fireSelectEvents(sel); await wait(400); } catch (e) { }
   }
 
@@ -558,7 +606,7 @@
         try {
           simulateClick(tg.el); actionsLog.push(label + ":R:" + tg.id);
           await waitForStable();
-          await wait(800); // Wartezeit fuer Felder die danach erscheinen
+          await wait(1200); // FIX v39 #5: 800→1200ms, AJAX-Ketten brauchen mehr Zeit
           scanFields(label + ":R:" + tg.id);
         } catch (e) { }
         if (allFields.size > vorher) {
@@ -706,9 +754,9 @@
   var istVorblatt = !!(antrag1 || antrag2);
 
   log("============================================");
-  log("FORMULAR 1400 - SCAN v38 (Multi-Page)");
-  log("simulateClick statt el.click()");
-  log("Dropdowns vor spezifischen Pfaden");
+  log("FORMULAR 1400 - SCAN v39 (Multi-Page)");
+  log("waitForStable +300ms Puffer (Fix #1)");
+  log("scanFields aktualisiert hidden→visible (Fix #2)");
   log("============================================");
 
   // ================================================
@@ -746,7 +794,10 @@
     // ================================================
     log("Schritt 4: Registereintrag Antragsteller...");
     await sucheRadioUndKlicke("registereintrag", "ja", "Register Ja");
-    await sucheRadioUndKlicke("register", "ja", "Register Ja (alt)");
+    // FIX v39 #4: "register" als Substring matched auch "regeintrag" und
+    // andere Radio-Namen. Exakter Pattern "_k_register" verhindert, dass
+    // das falsche Radio geklickt wird und den Formular-Zustand korrumpiert.
+    await sucheRadioUndKlicke("_k_register", "ja", "Register Ja (alt)");
     await wait(2000); await waitForStable(); scanFields("NachRegister");
     sucheRegisterFelder(["Vorblatt_reg_art", "Vorblatt_reg_nr", "Vorblatt_reg_gericht"], "Register-Antragsteller");
 
@@ -1083,7 +1134,7 @@
     url: window.location.href,
     pageTitle: document.title,
     formularId: "1400",
-    scanVersion: "v38-multipage",
+    scanVersion: "v39-multipage",
     runtimeSeconds: elapsed,
     totalScans: scanCount,
     totalFields: arr.length,
@@ -1104,7 +1155,7 @@
   var jsonStr = JSON.stringify(result, null, 2);
   try {
     await navigator.clipboard.writeText(jsonStr);
-    console.log("%c FERTIG! " + arr.length + " Felder in " + elapsed + "s (alle Seiten)", "color:green;font-size:20px;font-weight:bold;");
+    console.log("%c FERTIG! " + arr.length + " Felder in " + elapsed + "s (alle Seiten) [v39]", "color:green;font-size:20px;font-weight:bold;");
     console.log("%c VB:" + result.pagesScanned.vorblatt + " | S1:" + result.pagesScanned.seite1 + " | S2:" + result.pagesScanned.seite2, "color:green;font-size:14px;");
     if (errors.length > 0) console.log("%c " + errors.length + " Fehler", "color:red;font-size:13px;");
     console.log("%c Strg+V im Chat!", "color:blue;font-size:16px;font-weight:bold;");
