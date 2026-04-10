@@ -164,11 +164,18 @@ async function runJob(jobId, excelPath, emitter) {
   const isCloud = !!process.env.RENDER;
   const browser = await chromium.launch({
     headless: isCloud,
-    args: isCloud ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] : [],
+    args: isCloud ? [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--window-size=1920,1080',
+    ] : [],
   });
 
+  // Viewport 1920×1080 damit getBoundingClientRect() korrekte Werte liefert
   const context = await browser.newContext({
     permissions: ['clipboard-read', 'clipboard-write'],
+    viewport: { width: 1920, height: 1080 },
   });
   const page = await context.newPage();
   page.setDefaultTimeout(0); // kein Timeout
