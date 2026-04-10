@@ -312,6 +312,23 @@
     sel.dispatchEvent(new Event("blur",{bubbles:true}));
   }
 
+  // Robuster Klick: vollstaendige Event-Kette wie ein echter User-Klick
+  // FMS/ffw.js reagiert auf change-Events, nicht nur auf click
+  function simulateClick(el){
+    var rect = el.getBoundingClientRect();
+    var cx = rect.left + rect.width/2;
+    var cy = rect.top + rect.height/2;
+    var opts = {bubbles:true, cancelable:true, view:window, clientX:cx, clientY:cy};
+    el.dispatchEvent(new MouseEvent("mousedown", opts));
+    el.dispatchEvent(new MouseEvent("mouseup", opts));
+    el.click();
+    el.dispatchEvent(new Event("change", {bubbles:true}));
+    el.dispatchEvent(new Event("input", {bubbles:true}));
+    if(el.type==="radio"||el.type==="checkbox"){
+      if(!el.checked) el.checked = true;
+    }
+  }
+
   // Hilfsfunktion: Feld per ID klicken + scannen
   async function klickeUndScanne(id, beschreibung){
     if(isTimedOut()) return 0;
@@ -320,7 +337,7 @@
     var cs = window.getComputedStyle(el);
     if(cs.display === "none" || cs.visibility === "hidden" || el.disabled) return 0;
     var vorher = allFields.size;
-    el.click(); actionsLog.push(beschreibung||id);
+    simulateClick(el); actionsLog.push(beschreibung||id);
     await waitForStable(); scanFields(beschreibung||id);
     var neu = allFields.size - vorher;
     if(neu > 0) log("  -> " + neu + " neue Felder nach: " + beschreibung);
@@ -338,9 +355,8 @@
       var istNein = r.value==="nein"||r.id.indexOf("_nein")>=0;
       if((jaOderNein==="ja"&&istJa)||(jaOderNein==="nein"&&istNein)){
         var cs = window.getComputedStyle(r);
-        // Auch klicken wenn hidden (Register-Felder!)
         var vorher = allFields.size;
-        r.click(); actionsLog.push(beschreibung);
+        simulateClick(r); actionsLog.push(beschreibung);
         await waitForStable(); scanFields(beschreibung);
         return allFields.size - vorher;
       }
@@ -383,7 +399,7 @@
             var rKey = label+":Sel:"+selId+":R:"+r.id;
             if(actionsLog.indexOf(rKey) === -1){
               var v2 = allFields.size;
-              r.click(); actionsLog.push(rKey);
+              simulateClick(r); actionsLog.push(rKey);
               await waitForStable();
               await wait(1500); // Extra Wartezeit fuer Felder die ganz unten erscheinen
               scanFields(rKey);
@@ -398,7 +414,7 @@
                 log("    >> eintrag-Nein geklickt, klicke sofort Ja fuer reg_art2/reg_nr2...");
                 var jaRad = document.querySelector("input[type=radio][name='eintrag'][id*='_ja']");
                 if(jaRad){
-                  jaRad.click();
+                  simulateClick(jaRad);
                   await waitForStable();
                   await wait(2000); // Warten auf AJAX-Rendering
                   scanFields(rKey+":JaReset");
@@ -540,7 +556,7 @@
         if(cs2.display === "none" || cs2.visibility === "hidden" || tg.el.checked) continue;
         var vorher = allFields.size;
         try{
-          tg.el.click(); actionsLog.push(label+":R:"+tg.id);
+          simulateClick(tg.el); actionsLog.push(label+":R:"+tg.id);
           await waitForStable();
           await wait(800); // Wartezeit fuer Felder die danach erscheinen
           scanFields(label+":R:"+tg.id);
@@ -592,7 +608,7 @@
         var cs2 = window.getComputedStyle(tg.el);
         if(cs2.display === "none" || cs2.visibility === "hidden" || tg.el.checked) continue;
         var vorher = allFields.size;
-        try{ tg.el.click(); actionsLog.push(label+":CB:"+tg.id); await waitForStable(); scanFields(label+":CB:"+tg.id); }catch(e){}
+        try{ simulateClick(tg.el); actionsLog.push(label+":CB:"+tg.id); await waitForStable(); scanFields(label+":CB:"+tg.id); }catch(e){}
         if(allFields.size > vorher){ log("  >> " + tg.id + " -> +" + (allFields.size-vorher) + " neu"); neuInSweep += (allFields.size - vorher); }
       }
 
@@ -690,8 +706,8 @@
   var istVorblatt = !!(antrag1 || antrag2);
 
   log("============================================");
-  log("FORMULAR 1400 - SCAN v35 (Multi-Page)");
-  log("Fix: Registereintrag Empfangsbevollm.");
+  log("FORMULAR 1400 - SCAN v38 (Multi-Page)");
+  log("simulateClick statt el.click()");
   log("Dropdowns vor spezifischen Pfaden");
   log("============================================");
 
@@ -710,7 +726,7 @@
     // ================================================
     log("Schritt 2: Antrag in eigenem Namen aktivieren...");
     if(antrag1 && !antrag1.checked){
-      antrag1.click();
+      simulateClick(antrag1);
       await waitForStable();
       scanFields("EigenemNamen");
     }
@@ -818,9 +834,9 @@
           if(jaEl){
             // Ja ist evtl schon checked → Nein klicken (Reset), dann Ja
             if(jaEl.checked && neinEl){
-              neinEl.click(); await waitForStable(); await wait(500);
+              simulateClick(neinEl); await waitForStable(); await wait(500);
             }
-            jaEl.click();
+            simulateClick(jaEl);
             actionsLog.push("8c:eintrag-ja");
             await waitForStable();
             await wait(3000); // Warten auf AJAX reg_art2 etc.
@@ -874,18 +890,14 @@
     if(!isTimedOut()){
       log("Schritt 9: Antrag in fremdem Namen...");
       if(antrag2){
-        antrag2.click();
+        simulateClick(antrag2);
         await waitForStable(); scanFields("FremdemNamen");
-
         // 9a: Registereintrag des Vertretenen (name="registereintrag")
-        //     Erscheint wenn Rechtsform != AdöR
         await sucheRadioUndKlicke("registereintrag", "ja", "Register Vertreten Ja");
         await wait(1500); await waitForStable(); scanFields("NachRegisterVertreten");
         sucheRegisterFelder(["Vorblatt_reg_art","Vorblatt_reg_nr","Vorblatt_reg_gericht"], "Register-Vertreten");
 
         // 9b: Registereintrag des Empfangsbevollmaechtigten (name="regeintrag")
-        //     Felder: Vorblatt_k_regeintrag_vertr_ja/nein -> reg_art3, reg_nr3, reg_gericht3
-        //     FIX v35: "regeintrag" statt "registereintrag" — name im DOM ist "regeintrag"!
         await sucheRadioUndKlicke("regeintrag", "ja", "Regeintrag Vertr Ja");
         await wait(2000); await waitForStable(); scanFields("NachRegeintragVertr");
         sucheRegisterFelder(["Vorblatt_k_regeintrag_vertr_ja","Vorblatt_k_regeintrag_vertr_nein",
@@ -1071,7 +1083,7 @@
     url: window.location.href,
     pageTitle: document.title,
     formularId: "1400",
-    scanVersion: "v35-multipage",
+    scanVersion: "v38-multipage",
     runtimeSeconds: elapsed,
     totalScans: scanCount,
     totalFields: arr.length,
