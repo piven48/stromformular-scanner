@@ -13,7 +13,7 @@ const { EventEmitter } = require('events');
 const { chromium } = require('playwright');
 const { parseExcel, runComparison, generateExcel, enhanceWithClaude } = require('./compare');
 
-const SCAN_JS   = fs.readFileSync(path.join(__dirname, 'scan_v34.js'), 'utf8');
+const SCAN_JS   = fs.readFileSync(path.join(__dirname, 'Final_Formular_Scan_v35.js'), 'utf8');
 const FORM_URL  = 'https://www.formulare-bfinv.de/ffw/action/invoke.do?id=1400';
 const PORT      = process.env.PORT || 3400;
 const JOBS_DIR  = path.join(os.tmpdir(), 'formular-jobs');
@@ -209,12 +209,7 @@ async function runJob(jobId, excelPath, emitter) {
 
   emit(emitter, 'progress', { pct: 10, text: 'Scan läuft (~3-5 Minuten)...' });
 
-  // MAX_RUNTIME auf 15 Min hochsetzen damit Seite 2 nicht übersprungen wird
-  const scanJsPatched = SCAN_JS.replace(
-    /var MAX_RUNTIME\s*=\s*\d+\s*\*\s*60\s*\*\s*1000/,
-    'var MAX_RUNTIME = 15 * 60 * 1000'
-  );
-  const scanResult = await page.evaluate(scanJsPatched);
+  const scanResult = await page.evaluate(SCAN_JS);
   await browser.close();
 
   if (!scanResult?.fields) throw new Error('Scan hat kein Ergebnis zurückgegeben.');
