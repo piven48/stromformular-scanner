@@ -1,12 +1,11 @@
 {
-  "name": "stromformular-agent",
+  "name": "stromformular-scanner",
   "version": "1.0.0",
-  "description": "Automation agent for BFin Stromsteuer form scanning and analysis",
-  "main": "agent.js",
+  "description": "Formular 1400 Scanner – Weboberfläche für IIS und lokalen Betrieb",
+  "main": "server.js",
   "scripts": {
-    "start": "node agent.js",
-    "scan": "node agent.js --scan-only",
-    "analyze": "node agent.js --analyze-only"
+    "start": "node server.js",
+    "setup": "npm install && npx playwright install chromium"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",

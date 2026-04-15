@@ -160,14 +160,15 @@ async function runJob(jobId, excelPath, emitter) {
   emit(emitter, 'log', 'Browser wird gestartet...');
   emit(emitter, 'progress', { pct: 5, text: 'Browser startet...' });
 
-  // Lokal: sichtbarer Browser / Render: headless
-  const isCloud = !!process.env.RENDER;
+  // Lokal (HEADLESS=0): sichtbarer Browser / IIS/Server: headless
+  const isHeadless = process.env.HEADLESS !== '0';
   const browser = await chromium.launch({
-    headless: isCloud,
-    args: isCloud ? [
+    headless: isHeadless,
+    args: isHeadless ? [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
       '--window-size=1920,1080',
     ] : [],
   });
